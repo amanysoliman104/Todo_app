@@ -1,0 +1,111 @@
+from flask import Flask , render_template , request , redirect , url_for , jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+import sys
+
+app=Flask(__name__)
+db=SQLAlchemy(app)
+
+migrate=Migrate(app,db)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://postgres:amany@localhost:5432/todoapp'
+
+#******************************************************
+#parent class
+class TodoList(db.Model):
+    __tablename__ = 'todolists'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(), nullable=False)
+    #children=db.relationship('children-class', refrance what the neme of parent should be (backref='list'))
+    todos=db.relationship('Todo',backref='list',lazy=True)
+
+
+
+#******************************************************
+#children class
+class Todo(db.Model):
+    __tablename__ = 'todos'
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String(), nullable=False)
+    completed= db.Column(db.Boolean,nullable=False,default=False)
+    list_id=db.Column(db.Integer,db.ForeignKey('todolists.id'),nullable=False)#foreingkey('parent-table.id')
+    
+
+    
+    def __repr__(self):
+        return f'<Todo {self.id} {self.description}>'
+#*******************************************************
+#db.create_all()
+@app.route('/')
+def index():
+    return redirect(url_for('get_list_todos',list_id=1))
+#*******************************************************
+@app.route('/todos/create', methods=['POST'])
+def create_todo():
+    error=False
+    body={}
+    try:
+        #get data input from form in html ,,,description is a value in body fetch in html 
+        description=request.get_json()['description']
+        #put data on class attr as values
+        todo = Todo(description=description)
+        db.session.add(todo)
+        db.session.commit()
+        #get data from db befor closing the conn to avoid expierd of this object (when call object after close conn it give you that object is expired date)
+        body['description'] = todo.description
+
+    except:
+        error=True
+        db.session.rollback()
+        #catch error in terminal 
+        print(sys.exc_info())
+
+    finally:
+        #to can connection pool to handle close conn
+        db.session.close()
+    if error:
+        abort (400)
+    else:
+        return jsonify(body)
+    
+  #******************************************************
+
+@app.route('/todos/<todo_id>/set-completed', methods=['POST'])
+def set_completed_todo(todo_id):
+  try:
+    completed = request.get_json()['completed']
+    print('completed', completed)
+    todo = Todo.query.get(todo_id)
+    todo.completed = completed
+    db.session.commit()
+  except:
+    db.session.rollback()
+  finally:
+    db.session.close()
+  return redirect(url_for('index'))
+
+#******************************************************
+#delete fun
+@app.route('/todos/<todo_id>', methods=['DELETE'])
+def delete_todo(todo_id):
+  try:
+    Todo.query.filter_by(id=todo_id).delete()
+    db.session.commit()
+  except:
+    db.session.rollback()
+  finally:
+    db.session.close()
+  return jsonify({ 'success': True })
+
+#***************************************************
+@app.route('/list/<list_id>')
+def get_list_todos(list_id):
+    return render_template('index.html',lists=TodoList.query.all(),
+        active_list=TodoList.query.get(list_id),
+        todos=Todo.query.filter_by(list_id=list_id).order_by('id').all())
+
+
+
+
+#***************************************************
+  
+    
